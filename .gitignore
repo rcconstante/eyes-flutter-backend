@@ -4,6 +4,10 @@ __pycache__/
 .env
 venv/
 .venv/
+# Allow production models
+!models/yolov8n.pt
+!models/zero_dce_model.h5
+# But ignore other model files
 models/*.pt
 models/*.h5
 models/*.tflite
