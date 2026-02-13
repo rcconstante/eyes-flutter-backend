@@ -26,12 +26,11 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    """Load all AI models once on startup, release on shutdown."""
-    logger.info("Loading AI models …")
+    """Initialize model manager (lazy loading on first request)."""
+    logger.info("Initializing model manager (lazy loading enabled)")
     manager = ModelManager()
-    manager.load_all()
     application.state.model_manager = manager
-    logger.info("All models loaded ✓")
+    logger.info("Server ready ✓")
     yield
     logger.info("Shutting down – releasing models …")
     manager.unload_all()

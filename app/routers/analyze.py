@@ -43,21 +43,22 @@ async def analyze_image(request: Request, image: UploadFile = File(...)):
 
     # ── 2. Low-light enhancement ───────────────────────────────
     enhanced = False
-    if manager.zero_dce and manager.zero_dce.is_low_light(
-        pil_image, threshold=settings.LOW_LIGHT_THRESHOLD
-    ):
-        pil_image = manager.zero_dce.enhance(pil_image)
+    zero_dce = manager.get_zero_dce()
+    if zero_dce.is_low_light(pil_image, threshold=settings.LOW_LIGHT_THRESHOLD):
+        pil_image = zero_dce.enhance(pil_image)
         enhanced = True
         logger.info("Low-light detected → image enhanced")
 
     # ── 3. Object detection ────────────────────────────────────
-    detections = manager.yolo.detect(pil_image) if manager.yolo else []
+    yolo = manager.get_yolo()
+    detections = yolo.detect(pil_image)
     logger.info(f"Detected {len(detections)} objects")
 
     # ── 4. Depth estimation ────────────────────────────────────
     depth_map = None
-    if manager.midas and detections:
-        depth_map = manager.midas.estimate_depth_map(pil_image)
+    if detections:
+        midas = manager.get_midas()
+        depth_map = midas.estimate_depth_map(pil_image)
 
     # ── 5. Map each detection to a distance ────────────────────
     detection_results: list[dict] = []
@@ -65,8 +66,9 @@ async def analyze_image(request: Request, image: UploadFile = File(...)):
 
     for det in detections:
         distance = 0.0
-        if manager.midas and depth_map is not None:
-            distance = manager.midas.estimate_distance(
+        if depth_map is not None:
+            midas = manager.get_midas()
+            distance = midas.estimate_distance(
                 depth_map=depth_map,
                 bbox=det.bbox,
                 label=det.label,
