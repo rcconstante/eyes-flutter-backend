@@ -14,12 +14,10 @@ COPY requirements.txt .
 # Install Python packages
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip uninstall -y opencv-python tensorboard 2>/dev/null || true \
-    && find /usr/local/lib/python3.11/site-packages -type d \( -name 'tests' -o -name 'test' -o -name '__pycache__' \) -exec rm -rf {} + 2>/dev/null || true \
+    && find /usr/local/lib/python3.11/site-packages -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/local/lib/python3.11/site-packages -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete \
     && rm -rf /usr/local/lib/python3.11/site-packages/torch/test \
-    && rm -rf /usr/local/lib/python3.11/site-packages/torch/bin \
     && rm -rf /usr/local/lib/python3.11/site-packages/tensorflow/include \
-    && rm -rf /usr/local/lib/python3.11/site-packages/tensorboard* \
     && rm -rf /root/.cache
 
 # Copy application
