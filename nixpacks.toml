@@ -3,6 +3,9 @@ aptPkgs = ["libgl1", "libglib2.0-0"]
 
 [phases.install]
 cmds = [
-  "python -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install -r requirements.txt",
-  ". /opt/venv/bin/activate && pip uninstall -y opencv-python 2>/dev/null; pip install --force-reinstall opencv-python-headless==4.10.0.84"
+  "python -m venv /opt/venv && . /opt/venv/bin/activate && pip install --no-cache-dir -r requirements.txt && pip uninstall -y opencv-python 2>/dev/null || true",
+  "find /opt/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true",
+  "find /opt/venv -type f -name '*.pyc' -delete 2>/dev/null || true",
+  "find /opt/venv -type f -name '*.pyo' -delete 2>/dev/null || true",
+  "sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*"
 ]
