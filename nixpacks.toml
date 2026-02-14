@@ -14,5 +14,5 @@ cmds = [
   "rm -rf /opt/venv/lib/python3.11/site-packages/torch/test 2>/dev/null || true",
   "rm -rf /opt/venv/lib/python3.11/site-packages/tensorflow/include 2>/dev/null || true",
   "rm -rf /opt/venv/lib/python3.11/site-packages/tensorboard* 2>/dev/null || true",
-  "sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /root/.cache"
+  "sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*"
 ]
