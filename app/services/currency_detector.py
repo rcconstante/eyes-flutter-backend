@@ -32,19 +32,30 @@ def detect_currency(detections: list[Detection]) -> str | None:
     """
     Return a spoken-friendly string summarising detected currency.
 
-    Example: "₱100 bill and ₱20 bill, total ₱120"
+    Groups duplicate denominations and sums the total.
+    Example: "2× ₱100 bill, 1× ₱20 bill – total ₱220"
     Returns None if no currency is detected.
     """
-    found: list[tuple[str, float]] = []
+    from collections import Counter
+
+    counts: Counter[str] = Counter()
 
     for det in detections:
-        entry = _CURRENCY_MAP.get(det.label)
-        if entry is not None:
-            found.append(entry)
+        if det.label in _CURRENCY_MAP:
+            counts[det.label] += 1
 
-    if not found:
+    if not counts:
         return None
 
-    total = sum(v for _, v in found)
-    names = ", ".join(n for n, _ in found)
+    total = 0.0
+    parts: list[str] = []
+    for label, count in counts.items():
+        display_name, value = _CURRENCY_MAP[label]
+        total += value * count
+        if count > 1:
+            parts.append(f"{count}× {display_name}")
+        else:
+            parts.append(display_name)
+
+    names = ", ".join(parts)
     return f"{names} – total ₱{total:,.0f}"

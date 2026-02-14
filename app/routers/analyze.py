@@ -97,9 +97,11 @@ async def analyze_image(request: Request, image: UploadFile = File(...)):
     logger.info(f"Pipeline done in {elapsed}s | priority={priority['label']} | scene={scene_type}")
 
     # ── 9. Build response matching Flutter ResultModel ─────────
+    is_critical = priority["label"] in settings.CRITICAL_OBJECTS
     return {
         "priority_object": priority["label"],
         "distance": priority["distance"],
+        "is_critical": is_critical,
         "currency": currency,
         "scene_type": scene_type,
         "alerts": alerts,
