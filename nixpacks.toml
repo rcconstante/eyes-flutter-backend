@@ -3,16 +3,15 @@ aptPkgs = ["libgl1", "libglib2.0-0"]
 
 [phases.install]
 cmds = [
-  "python -m venv /opt/venv && . /opt/venv/bin/activate && pip install --no-cache-dir -r requirements.txt",
-  ". /opt/venv/bin/activate && (pip uninstall -y opencv-python 2>/dev/null || true) && pip install --no-cache-dir --force-reinstall opencv-python-headless==4.10.0.84",
-  "find /opt/venv -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true",
-  "find /opt/venv -type f -name '*.pyc' -delete 2>/dev/null || true",
-  "find /opt/venv -type f -name '*.pyo' -delete 2>/dev/null || true",
-  "find /opt/venv -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true",
-  "find /opt/venv -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true",
-  "find /opt/venv/lib -name '*.so' -exec strip --strip-unneeded {} \\; 2>/dev/null || true",
-  "rm -rf /opt/venv/lib/python3.11/site-packages/torch/test 2>/dev/null || true",
-  "rm -rf /opt/venv/lib/python3.11/site-packages/tensorflow/include 2>/dev/null || true",
-  "rm -rf /opt/venv/lib/python3.11/site-packages/tensorboard* 2>/dev/null || true",
-  "sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*"
+  "python -m venv /opt/venv",
+  ". /opt/venv/bin/activate && pip install --no-cache-dir -r requirements.txt"
+]
+
+[phases.build]
+cmds = [
+  ". /opt/venv/bin/activate && (pip uninstall -y opencv-python tensorboard 2>/dev/null || true)",
+  "find /opt/venv -type d -name 'tests' -o -name 'test' -o -name '__pycache__' | xargs rm -rf",
+  "find /opt/venv -name '*.pyc' -o -name '*.pyo' -delete",
+  "rm -rf /opt/venv/lib/python3.11/site-packages/torch/test",
+  "rm -rf /opt/venv/lib/python3.11/site-packages/tensorflow/include"
 ]
