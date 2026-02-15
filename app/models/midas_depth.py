@@ -119,18 +119,46 @@ class MidasDepth:
         if x2 <= x1 or y2 <= y1:
             return None
 
-        region = depth_map[y1:y2, x1:x2]
+        # Use center 60% of bbox for more accurate depth (avoids edges)
+        cx = (x1 + x2) // 2
+        cy = (y1 + y2) // 2
+        rw = max(1, int((x2 - x1) * 0.3))
+        rh = max(1, int((y2 - y1) * 0.3))
+        rx1 = max(0, cx - rw)
+        ry1 = max(0, cy - rh)
+        rx2 = min(w, cx + rw)
+        ry2 = min(h, cy + rh)
+
+        region = depth_map[ry1:ry2, rx1:rx2]
+        if region.size == 0:
+            region = depth_map[y1:y2, x1:x2]
+
         median_val = float(np.median(region))
 
         if median_val <= 0:
             return None
 
-        # MiDaS outputs relative inverse depth; scale heuristically.
-        # This multiplier is calibrated experimentally – replace with
-        # your own after testing with known distances.
-        SCALE = 1500.0
-        distance = SCALE / median_val
-        return min(distance, 30.0)  # cap at 30 m
+        # MiDaS outputs relative inverse depth.
+        # Normalize against the full depth map range for more stable results.
+        depth_min = float(np.min(depth_map))
+        depth_max = float(np.max(depth_map))
+        depth_range = depth_max - depth_min
+        if depth_range <= 0:
+            return None
+
+        # Normalized depth: 0 = farthest, 1 = closest
+        normalized = (median_val - depth_min) / depth_range
+
+        # Map normalized depth to distance (metres)
+        # Close objects (normalized ~1.0) -> ~0.3m
+        # Far objects (normalized ~0.0) -> ~15m
+        MIN_DIST = 0.3
+        MAX_DIST = 15.0
+        if normalized <= 0.01:
+            return MAX_DIST
+
+        distance = MIN_DIST + (1.0 - normalized) * (MAX_DIST - MIN_DIST)
+        return round(min(max(distance, MIN_DIST), MAX_DIST), 2)
 
     @staticmethod
     def _pinhole_distance(
@@ -138,9 +166,20 @@ class MidasDepth:
         bbox_height_px: int,
         image_height: int,
     ) -> float | None:
-        """Classic D = (F × H_real) / H_pixel estimate."""
+        """Classic D = (F × H_real) / H_pixel estimate.
+
+        Dynamically scales focal length based on image resolution
+        so that distance estimates work regardless of camera resolution.
+        """
         known_h = settings.KNOWN_HEIGHTS.get(label)
         if known_h is None or bbox_height_px <= 0:
             return None
-        distance = (settings.FOCAL_LENGTH_PX * known_h) / bbox_height_px
-        return min(distance, 30.0)
+
+        # Scale focal length proportionally to image height.
+        # The configured FOCAL_LENGTH_PX assumes a 640px image height.
+        # Mobile cameras send varying resolutions, so we compensate.
+        REFERENCE_HEIGHT = 640.0
+        scaled_focal = settings.FOCAL_LENGTH_PX * (image_height / REFERENCE_HEIGHT)
+
+        distance = (scaled_focal * known_h) / bbox_height_px
+        return round(min(max(distance, 0.2), 20.0), 2)

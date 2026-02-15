@@ -13,11 +13,13 @@ class Settings:
 
     # Processing
     IMAGE_SIZE: int = int(os.getenv("IMAGE_SIZE", "640"))
-    CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
+    CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.20"))
     LOW_LIGHT_THRESHOLD: float = float(os.getenv("LOW_LIGHT_THRESHOLD", "0.35"))
+    MAX_PRIORITY_OBJECTS: int = int(os.getenv("MAX_PRIORITY_OBJECTS", "3"))
 
     # Distance calibration (approximate focal-length based)
-    FOCAL_LENGTH_PX: float = float(os.getenv("FOCAL_LENGTH_PX", "500.0"))
+    # Reference focal length at 640px image height; auto-scaled for other resolutions
+    FOCAL_LENGTH_PX: float = float(os.getenv("FOCAL_LENGTH_PX", "600.0"))
     KNOWN_HEIGHTS: dict = {
         "person": 1.7,
         "car": 1.5,

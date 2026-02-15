@@ -21,7 +21,7 @@ from PIL import Image
 
 from app.config import settings
 from app.services.scene_classifier import classify_scene
-from app.services.priority_engine import pick_priority_object, generate_alerts
+from app.services.priority_engine import pick_priority_object, pick_priority_objects, generate_alerts
 from app.services.currency_detector import detect_currency
 
 logger = logging.getLogger("eyes.analyze")
@@ -91,13 +91,26 @@ async def analyze_image(request: Request, image: UploadFile = File(...)):
 
     # ── 8. Priority & alerts ───────────────────────────────────
     priority = pick_priority_object(detection_results)
+    top_objects = pick_priority_objects(detection_results, max_items=settings.MAX_PRIORITY_OBJECTS)
     alerts = generate_alerts(detection_results)
 
     elapsed = round(time.time() - t0, 3)
-    logger.info(f"Pipeline done in {elapsed}s | priority={priority['label']} | scene={scene_type}")
+    logger.info(f"Pipeline done in {elapsed}s | priority={priority['label']} | top={[o['label'] for o in top_objects]} | scene={scene_type}")
 
     # ── 9. Build response matching Flutter ResultModel ─────────
     is_critical = priority["label"] in settings.CRITICAL_OBJECTS
+
+    # Build top_objects list for the app
+    top_objects_response = [
+        {
+            "label": obj["label"],
+            "distance": obj.get("distance", 0.0),
+            "confidence": obj.get("confidence", 0.0),
+            "is_critical": obj["label"] in settings.CRITICAL_OBJECTS,
+        }
+        for obj in top_objects
+    ]
+
     return {
         "priority_object": priority["label"],
         "distance": priority["distance"],
@@ -106,6 +119,8 @@ async def analyze_image(request: Request, image: UploadFile = File(...)):
         "scene_type": scene_type,
         "alerts": alerts,
         "detections": detection_results,
+        "top_objects": top_objects_response,
+        "total_detected": len(detection_results),
         "enhanced": enhanced,
         "processing_time": elapsed,
     }
