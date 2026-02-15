@@ -59,4 +59,11 @@ class YoloDetector:
                         bbox_height_px=bbox_h,
                     )
                 )
+        
+        # Log detection details
+        if detections:
+            logger.info(f"Detected {len(detections)} objects: {[(d.label, f'{d.confidence:.2f}') for d in detections]}")
+        else:
+            logger.warning(f"No objects detected (confidence threshold: {settings.CONFIDENCE_THRESHOLD})")
+        
         return detections

@@ -13,7 +13,7 @@ class Settings:
 
     # Processing
     IMAGE_SIZE: int = int(os.getenv("IMAGE_SIZE", "640"))
-    CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.35"))
+    CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
     LOW_LIGHT_THRESHOLD: float = float(os.getenv("LOW_LIGHT_THRESHOLD", "0.35"))
 
     # Distance calibration (approximate focal-length based)
