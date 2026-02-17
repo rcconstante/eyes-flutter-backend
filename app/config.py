@@ -13,9 +13,8 @@ class Settings:
 
     # Processing
     IMAGE_SIZE: int = int(os.getenv("IMAGE_SIZE", "640"))
-    CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.20"))
+    CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
     LOW_LIGHT_THRESHOLD: float = float(os.getenv("LOW_LIGHT_THRESHOLD", "0.35"))
-    MAX_PRIORITY_OBJECTS: int = int(os.getenv("MAX_PRIORITY_OBJECTS", "3"))
 
     # Distance calibration (approximate focal-length based)
     # Reference focal length at 640px image height; auto-scaled for other resolutions
