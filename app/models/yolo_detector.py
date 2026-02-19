@@ -32,12 +32,16 @@ class YoloDetector:
         self.model = YOLO(settings.YOLO_MODEL_PATH)
         logger.info(f"YOLO loaded from {settings.YOLO_MODEL_PATH}")
 
-    def detect(self, image: Image.Image) -> list[Detection]:
+    def detect(self, image: Image.Image, conf: float | None = None) -> list[Detection]:
         """Run inference on a PIL Image and return a list of Detections."""
+        threshold = conf or settings.CONFIDENCE_THRESHOLD
+        img_w, img_h = image.size
+        logger.info(f"YOLO input: {img_w}x{img_h}, conf={threshold}, imgsz={settings.IMAGE_SIZE}")
+
         results = self.model.predict(
             source=image,
             imgsz=settings.IMAGE_SIZE,
-            conf=settings.CONFIDENCE_THRESHOLD,
+            conf=threshold,
             verbose=False,
         )
         detections: list[Detection] = []
@@ -59,11 +63,10 @@ class YoloDetector:
                         bbox_height_px=bbox_h,
                     )
                 )
-        
-        # Log detection details
+
         if detections:
             logger.info(f"Detected {len(detections)} objects: {[(d.label, f'{d.confidence:.2f}') for d in detections]}")
         else:
-            logger.warning(f"No objects detected (confidence threshold: {settings.CONFIDENCE_THRESHOLD})")
-        
+            logger.warning(f"No objects detected (threshold={threshold})")
+
         return detections

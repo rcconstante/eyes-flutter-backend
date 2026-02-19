@@ -104,11 +104,17 @@ class ZeroDCEEnhancer:
         return self._fallback_enhance(image)
 
     @staticmethod
-    def is_low_light(image: Image.Image, threshold: float = 0.35) -> bool:
+    def is_low_light(image: Image.Image, threshold: float = 0.15) -> bool:
         """Heuristic: if average pixel brightness < threshold consider low-light."""
         gray = image.convert("L")
         mean_brightness = np.array(gray).mean() / 255.0
         return mean_brightness < threshold
+
+    @staticmethod
+    def get_brightness(image: Image.Image) -> float:
+        """Return average brightness of the image as 0.0–1.0."""
+        gray = image.convert("L")
+        return float(np.array(gray).mean() / 255.0)
 
     # ── internals ─────────────────────────────────────────────
 

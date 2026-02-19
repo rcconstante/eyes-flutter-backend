@@ -38,13 +38,17 @@ async def analyze_image(request: Request, image: UploadFile = File(...)):
 
     # ── 1. Read image ──────────────────────────────────────────
     raw_bytes = await image.read()
+    logger.info(f"Received image: {len(raw_bytes)} bytes")
     pil_image = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
     original_size = pil_image.size  # (W, H)
+    logger.info(f"Image size: {original_size[0]}x{original_size[1]}")
 
-    # ── 2. Low-light enhancement ───────────────────────────────
+    # ── 2. Low-light check (only enhance if truly dark) ────────
     enhanced = False
     zero_dce = manager.get_zero_dce()
-    if zero_dce.is_low_light(pil_image, threshold=settings.LOW_LIGHT_THRESHOLD):
+    mean_brightness = zero_dce.get_brightness(pil_image)
+    logger.info(f"Image brightness: {mean_brightness:.3f} (threshold: {settings.LOW_LIGHT_THRESHOLD})")
+    if mean_brightness < settings.LOW_LIGHT_THRESHOLD:
         pil_image = zero_dce.enhance(pil_image)
         enhanced = True
         logger.info("Low-light detected → image enhanced")
@@ -53,6 +57,16 @@ async def analyze_image(request: Request, image: UploadFile = File(...)):
     yolo = manager.get_yolo()
     detections = yolo.detect(pil_image)
     logger.info(f"Detected {len(detections)} objects")
+
+    # If enhanced image yielded no results, retry with original
+    if enhanced and len(detections) == 0:
+        logger.info("Enhancement may have degraded image → retrying with original")
+        original_image = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+        detections = yolo.detect(original_image)
+        if detections:
+            logger.info(f"Original image detected {len(detections)} objects")
+            pil_image = original_image
+            enhanced = False
 
     # ── 4. Depth estimation ────────────────────────────────────
     depth_map = None
