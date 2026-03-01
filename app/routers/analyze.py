@@ -108,16 +108,8 @@ async def analyze_image(request: Request, image: UploadFile = File(...)):
     # switch to "currency mode": report the total sum instead.
     currency_mode = currency_result is not None
 
-    if currency_mode:
-        # In currency mode the spoken output is the currency summary,
-        # not the nearest obstacle.  We still compute priority for
-        # the haptic layer (so the user still gets vibration warnings
-        # for nearby obstacles), but the response foregrounds money.
-        priority = pick_priority_object(detection_results)
-        alerts = generate_alerts(detection_results)
-    else:
-        priority = pick_priority_object(detection_results)
-        alerts = generate_alerts(detection_results)
+    priority = pick_priority_object(detection_results)
+    alerts = generate_alerts(detection_results)
 
     elapsed = round(time.time() - t0, 3)
     logger.info(f"Pipeline done in {elapsed}s | priority={priority['label']} | scene={scene_type}")
@@ -128,20 +120,23 @@ async def analyze_image(request: Request, image: UploadFile = File(...)):
     priority_bbox = priority.get("bbox")  # may be None for "No object"
 
     if currency_mode:
-        # Override spoken priority with currency summary
+        # Currency mode suppresses prioritized-object visuals and distance.
         response_priority = currency_result.summary
+        response_distance = 0.0
         is_critical = False
+        priority_bbox = None
         response_currency = currency_result.summary
         response_currency_total = currency_result.total_amount
     else:
         response_priority = priority["label"]
+        response_distance = priority["distance"]
         is_critical = priority["label"] in settings.CRITICAL_OBJECTS
         response_currency = None
         response_currency_total = None
 
     return {
         "priority_object": response_priority,
-        "distance": priority["distance"],
+        "distance": response_distance,
         "is_critical": is_critical,
         "priority_bbox": priority_bbox,
         "currency": response_currency,
