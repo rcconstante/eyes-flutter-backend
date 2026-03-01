@@ -101,22 +101,52 @@ async def analyze_image(request: Request, image: UploadFile = File(...)):
     scene_type = classify_scene(detections)
 
     # ── 7. Currency detection ──────────────────────────────────
-    currency = detect_currency(detections)
+    currency_result = detect_currency(detections)
 
     # ── 8. Priority & alerts ───────────────────────────────────
-    priority = pick_priority_object(detection_results)
-    alerts = generate_alerts(detection_results)
+    # When currency is detected, disable normal object priority and
+    # switch to "currency mode": report the total sum instead.
+    currency_mode = currency_result is not None
+
+    if currency_mode:
+        # In currency mode the spoken output is the currency summary,
+        # not the nearest obstacle.  We still compute priority for
+        # the haptic layer (so the user still gets vibration warnings
+        # for nearby obstacles), but the response foregrounds money.
+        priority = pick_priority_object(detection_results)
+        alerts = generate_alerts(detection_results)
+    else:
+        priority = pick_priority_object(detection_results)
+        alerts = generate_alerts(detection_results)
 
     elapsed = round(time.time() - t0, 3)
     logger.info(f"Pipeline done in {elapsed}s | priority={priority['label']} | scene={scene_type}")
 
     # ── 9. Build response matching Flutter ResultModel ─────────
-    is_critical = priority["label"] in settings.CRITICAL_OBJECTS
+    # Include the bounding box of the priority object so the app can
+    # draw a highlight rectangle around it.
+    priority_bbox = priority.get("bbox")  # may be None for "No object"
+
+    if currency_mode:
+        # Override spoken priority with currency summary
+        response_priority = currency_result.summary
+        is_critical = False
+        response_currency = currency_result.summary
+        response_currency_total = currency_result.total_amount
+    else:
+        response_priority = priority["label"]
+        is_critical = priority["label"] in settings.CRITICAL_OBJECTS
+        response_currency = None
+        response_currency_total = None
+
     return {
-        "priority_object": priority["label"],
+        "priority_object": response_priority,
         "distance": priority["distance"],
         "is_critical": is_critical,
-        "currency": currency,
+        "priority_bbox": priority_bbox,
+        "currency": response_currency,
+        "currency_total": response_currency_total,
+        "currency_mode": currency_mode,
         "scene_type": scene_type,
         "alerts": alerts,
         "detections": detection_results,

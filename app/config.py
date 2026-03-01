@@ -4,11 +4,24 @@ Central configuration – reads from environment variables with sensible default
 
 import os
 
+# Resolve paths relative to the backend/ directory so the server works
+# regardless of the CWD it was started from (e.g. Railway, Docker, local dev).
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _resolve_model_path(relative: str) -> str:
+    """Return an absolute path anchored to the backend/ root."""
+    return os.path.join(_BACKEND_DIR, relative)
+
 
 class Settings:
     # Model paths (relative to backend/)
-    YOLO_MODEL_PATH: str = os.getenv("YOLO_MODEL_PATH", "models/yolov8n.pt")
-    ZERO_DCE_MODEL_PATH: str = os.getenv("ZERO_DCE_MODEL_PATH", "models/zero_dce_model.h5")
+    YOLO_MODEL_PATH: str = _resolve_model_path(
+        os.getenv("YOLO_MODEL_PATH", "models/yolov8n.pt")
+    )
+    ZERO_DCE_MODEL_PATH: str = _resolve_model_path(
+        os.getenv("ZERO_DCE_MODEL_PATH", "models/zero_dce_model.h5")
+    )
     MIDAS_MODEL_TYPE: str = os.getenv("MIDAS_MODEL_TYPE", "MiDaS_small")
 
     # Processing

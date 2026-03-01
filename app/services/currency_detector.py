@@ -3,10 +3,11 @@ Currency detector – extracts currency info from YOLO detections.
 
 If the YOLO model was trained with Philippine peso bill / coin classes
 (e.g. "20_peso", "100_peso", "coin_5"), this module aggregates them
-into a human-readable string and computes the total.
+into a human-readable string, computes the total, and returns both.
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -28,12 +29,20 @@ _CURRENCY_MAP: dict[str, tuple[str, float]] = {
 }
 
 
-def detect_currency(detections: list[Detection]) -> str | None:
+@dataclass
+class CurrencyResult:
+    """Structured currency detection result."""
+    summary: str          # e.g. "2× ₱100 bill, 1× ₱20 bill – total ₱220"
+    total_amount: float   # e.g. 220.0
+    item_count: int       # total number of bills/coins detected
+
+
+def detect_currency(detections: list[Detection]) -> CurrencyResult | None:
     """
-    Return a spoken-friendly string summarising detected currency.
+    Return a structured result summarising detected currency.
 
     Groups duplicate denominations and sums the total.
-    Example: "2× ₱100 bill, 1× ₱20 bill – total ₱220"
+    Example summary: "2× ₱100 bill, 1× ₱20 bill – total ₱220"
     Returns None if no currency is detected.
     """
     from collections import Counter
@@ -48,14 +57,17 @@ def detect_currency(detections: list[Detection]) -> str | None:
         return None
 
     total = 0.0
+    item_count = 0
     parts: list[str] = []
     for label, count in counts.items():
         display_name, value = _CURRENCY_MAP[label]
         total += value * count
+        item_count += count
         if count > 1:
             parts.append(f"{count}× {display_name}")
         else:
             parts.append(display_name)
 
     names = ", ".join(parts)
-    return f"{names} – total ₱{total:,.0f}"
+    summary = f"{names} – total ₱{total:,.0f}"
+    return CurrencyResult(summary=summary, total_amount=total, item_count=item_count)

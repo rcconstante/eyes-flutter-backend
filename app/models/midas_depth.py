@@ -7,12 +7,15 @@ boxes to estimate real-world distance to each detected object.
 
 Two estimation strategies:
   1. **Depth-map median**: median inverse-depth value inside each bbox,
-     converted to approximate metres.
+     converted to approximate metres via an inverse-proportional mapping
+     that better preserves close-range accuracy.
   2. **Pinhole fallback**: classic focal-length / bbox-height heuristic
      when the object has a known real-world height (from config).
 
-The final distance for each detection is the average of both when
-available, otherwise whichever method succeeds.
+The final distance uses a *weighted* combination: the depth-map
+estimate is trusted more for relative ordering, while the pinhole
+estimate (when available) anchors the scale.  When only one strategy
+succeeds it is used directly.
 """
 
 import logging
@@ -82,25 +85,29 @@ class MidasDepth:
         """
         Estimate real-world distance (metres) to the object.
 
-        Combines depth-map based estimation and pinhole-model
-        estimation when a known object height is available.
+        Uses a weighted fusion of depth-map estimation and pinhole
+        estimation.  The depth-map is given higher weight (0.6) when
+        both are available because it accounts for the actual scene
+        geometry, while pinhole (0.4) anchors the metric scale.
         """
-        distances: list[float] = []
-
-        # Strategy 1: Depth-map median inside bbox
         depth_dist = self._depth_map_distance(depth_map, bbox)
-        if depth_dist is not None and depth_dist > 0:
-            distances.append(depth_dist)
-
-        # Strategy 2: Pinhole model
         pinhole_dist = self._pinhole_distance(label, bbox_height_px, image_height)
-        if pinhole_dist is not None and pinhole_dist > 0:
-            distances.append(pinhole_dist)
 
-        if not distances:
+        has_depth = depth_dist is not None and depth_dist > 0
+        has_pinhole = pinhole_dist is not None and pinhole_dist > 0
+
+        if has_depth and has_pinhole:
+            # Weighted fusion: trust depth map more, pinhole anchors scale
+            DEPTH_WEIGHT = 0.6
+            PINHOLE_WEIGHT = 0.4
+            fused = DEPTH_WEIGHT * depth_dist + PINHOLE_WEIGHT * pinhole_dist
+            return round(float(fused), 2)
+        elif has_depth:
+            return round(float(depth_dist), 2)
+        elif has_pinhole:
+            return round(float(pinhole_dist), 2)
+        else:
             return 0.0
-
-        return round(float(np.mean(distances)), 2)
 
     # ── internals ─────────────────────────────────────────────
 
@@ -109,7 +116,13 @@ class MidasDepth:
         depth_map: np.ndarray,
         bbox: tuple[int, int, int, int],
     ) -> float | None:
-        """Convert median inverse-depth in the bbox region to metres."""
+        """Convert median inverse-depth in the bbox region to metres.
+
+        Uses an inverse-proportional mapping (distance ∝ 1/depth) which
+        better preserves close-range accuracy compared to the previous
+        linear mapping.  A scale factor is calibrated so that typical
+        indoor scenes produce reasonable metric values.
+        """
         x1, y1, x2, y2 = bbox
         h, w = depth_map.shape[:2]
 
@@ -119,7 +132,7 @@ class MidasDepth:
         if x2 <= x1 or y2 <= y1:
             return None
 
-        # Use center 60% of bbox for more accurate depth (avoids edges)
+        # Use center 60 % of bbox for more accurate depth (avoids edges)
         cx = (x1 + x2) // 2
         cy = (y1 + y2) // 2
         rw = max(1, int((x2 - x1) * 0.3))
@@ -134,30 +147,31 @@ class MidasDepth:
             region = depth_map[y1:y2, x1:x2]
 
         median_val = float(np.median(region))
-
         if median_val <= 0:
             return None
 
-        # MiDaS outputs relative inverse depth.
-        # Normalize against the full depth map range for more stable results.
-        depth_min = float(np.min(depth_map))
+        # ── Inverse-proportional mapping ──
+        # MiDaS outputs relative inverse-depth (higher = closer).
+        # We use:  distance = SCALE_FACTOR / median_depth
+        # The scale factor is tuned so that:
+        #   • An object covering most of the frame (median ≈ depth_max)
+        #     maps to ~0.3 m
+        #   • A distant object (median ≈ small) maps to ~15 m
+        #
+        # We derive the scale from the current frame's depth range to
+        # account for scene variation.
         depth_max = float(np.max(depth_map))
-        depth_range = depth_max - depth_min
-        if depth_range <= 0:
+        if depth_max <= 0:
             return None
 
-        # Normalized depth: 0 = farthest, 1 = closest
-        normalized = (median_val - depth_min) / depth_range
+        # Empirical scale: at max depth value → 0.5 m
+        CLOSE_ANCHOR = 0.5
+        scale_factor = CLOSE_ANCHOR * depth_max
 
-        # Map normalized depth to distance (metres)
-        # Close objects (normalized ~1.0) -> ~0.3m
-        # Far objects (normalized ~0.0) -> ~15m
-        MIN_DIST = 0.3
+        distance = scale_factor / median_val
+
+        MIN_DIST = 0.2
         MAX_DIST = 15.0
-        if normalized <= 0.01:
-            return MAX_DIST
-
-        distance = MIN_DIST + (1.0 - normalized) * (MAX_DIST - MIN_DIST)
         return round(min(max(distance, MIN_DIST), MAX_DIST), 2)
 
     @staticmethod
