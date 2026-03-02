@@ -43,26 +43,42 @@ async def analyze_image(request: Request, image: UploadFile = File(...)):
     original_size = pil_image.size  # (W, H)
     logger.info(f"Image size: {original_size[0]}x{original_size[1]}")
 
-    # ── 2. Low-light check (only enhance if truly dark) ────────
+    # ── 2. Low-light check (enhance if dim, aggressive if very dark) ─
     enhanced = False
+    very_dark = False
     zero_dce = manager.get_zero_dce()
     mean_brightness = zero_dce.get_brightness(pil_image)
-    logger.info(f"Image brightness: {mean_brightness:.3f} (threshold: {settings.LOW_LIGHT_THRESHOLD})")
-    if mean_brightness < settings.LOW_LIGHT_THRESHOLD:
-        pil_image = zero_dce.enhance(pil_image)
+    logger.info(
+        f"Image brightness: {mean_brightness:.3f} "
+        f"(low-light threshold: {settings.LOW_LIGHT_THRESHOLD}, "
+        f"very-low: {settings.VERY_LOW_LIGHT_THRESHOLD})"
+    )
+    if mean_brightness < settings.VERY_LOW_LIGHT_THRESHOLD:
+        very_dark = True
+        logger.info("Very low-light detected → aggressive enhancement")
+        pil_image = zero_dce.enhance(pil_image, very_dark=True)
         enhanced = True
-        logger.info("Low-light detected → image enhanced")
+        enhanced_brightness = zero_dce.get_brightness(pil_image)
+        logger.info(f"Brightness after enhancement: {enhanced_brightness:.3f}")
+    elif mean_brightness < settings.LOW_LIGHT_THRESHOLD:
+        pil_image = zero_dce.enhance(pil_image, very_dark=False)
+        enhanced = True
+        enhanced_brightness = zero_dce.get_brightness(pil_image)
+        logger.info(f"Low-light detected → image enhanced (brightness now {enhanced_brightness:.3f})")
 
     # ── 3. Object detection ────────────────────────────────────
+    # Use a lower confidence threshold for dark images so faint
+    # detections are not discarded prematurely.
     yolo = manager.get_yolo()
-    detections = yolo.detect(pil_image)
-    logger.info(f"Detected {len(detections)} objects")
+    det_conf = settings.LOW_LIGHT_CONFIDENCE if enhanced else None
+    detections = yolo.detect(pil_image, conf=det_conf)
+    logger.info(f"Detected {len(detections)} objects (conf={det_conf or settings.CONFIDENCE_THRESHOLD})")
 
     # If enhanced image yielded no results, retry with original
     if enhanced and len(detections) == 0:
         logger.info("Enhancement may have degraded image → retrying with original")
         original_image = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
-        detections = yolo.detect(original_image)
+        detections = yolo.detect(original_image, conf=settings.LOW_LIGHT_CONFIDENCE)
         if detections:
             logger.info(f"Original image detected {len(detections)} objects")
             pil_image = original_image

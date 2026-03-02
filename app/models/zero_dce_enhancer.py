@@ -8,16 +8,17 @@ Mirrors the architecture from the training notebook:
   - Enhancement: iterative curve application LE(x) = x + α·x·(1−x).
 
 On startup the model attempts to load a Keras H5 model from
-`models/zero_dce_model.h5`. If not found, it falls back to
-a simple histogram-equalization placeholder so the pipeline
-doesn't break while you upload the real weights.
+`models/zero_dce_model.h5`. If not found, it falls back to a
+multi-stage enhancement pipeline (CLAHE + gamma correction +
+auto-contrast) that is much more effective on very dark images.
 """
 
 import logging
 import os
 
+import cv2
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageEnhance
 
 logger = logging.getLogger("eyes.zero_dce")
 
@@ -92,19 +93,41 @@ class ZeroDCEEnhancer:
         else:
             logger.warning(
                 f"Zero-DCE model not found at {model_path}. "
-                "Using histogram-equalization fallback."
+                "Using CLAHE + gamma fallback."
             )
+
+    @property
+    def has_model(self) -> bool:
+        """True if the learned Zero-DCE model is available."""
+        return self.dce_model is not None
 
     # ── public API ────────────────────────────────────────────
 
-    def enhance(self, image: Image.Image) -> Image.Image:
-        """Return an enhanced PIL Image."""
+    def enhance(self, image: Image.Image, very_dark: bool = False) -> Image.Image:
+        """Return an enhanced PIL Image.
+
+        Args:
+            image: Input PIL image.
+            very_dark: If True, apply more aggressive enhancement
+                       (multi-pass model or stronger gamma).
+        """
         if self.dce_model is not None:
-            return self._enhance_with_model(image)
-        return self._fallback_enhance(image)
+            result = self._enhance_with_model(image)
+            # For very dark images, run a second pass through the model
+            if very_dark:
+                brightness_after = self.get_brightness(result)
+                logger.info(f"Brightness after 1st Zero-DCE pass: {brightness_after:.3f}")
+                if brightness_after < 0.30:
+                    result = self._enhance_with_model(result)
+                    logger.info(
+                        f"Brightness after 2nd Zero-DCE pass: "
+                        f"{self.get_brightness(result):.3f}"
+                    )
+            return result
+        return self._fallback_enhance(image, very_dark=very_dark)
 
     @staticmethod
-    def is_low_light(image: Image.Image, threshold: float = 0.15) -> bool:
+    def is_low_light(image: Image.Image, threshold: float = 0.35) -> bool:
         """Heuristic: if average pixel brightness < threshold consider low-light."""
         gray = image.convert("L")
         mean_brightness = np.array(gray).mean() / 255.0
@@ -141,7 +164,44 @@ class ZeroDCEEnhancer:
         return result
 
     @staticmethod
-    def _fallback_enhance(image: Image.Image) -> Image.Image:
-        """Simple auto-contrast + brightness boost as a stand-in."""
-        enhanced = ImageOps.autocontrast(image, cutoff=1)
+    def _fallback_enhance(image: Image.Image, very_dark: bool = False) -> Image.Image:
+        """Multi-stage fallback: CLAHE → gamma correction → auto-contrast.
+
+        Much more effective than plain autocontrast for truly dark images.
+        """
+        # ── Stage 1: CLAHE (Contrast Limited Adaptive Histogram Equalization) ──
+        # Works per-tile so it recovers local contrast even in very dark images.
+        img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+        # Convert to LAB colour space so we only enhance lightness
+        lab = cv2.cvtColor(img_cv, cv2.COLOR_BGR2LAB)
+        l_channel, a_channel, b_channel = cv2.split(lab)
+
+        clip_limit = 4.0 if very_dark else 3.0
+        clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
+        l_enhanced = clahe.apply(l_channel)
+
+        lab_enhanced = cv2.merge([l_enhanced, a_channel, b_channel])
+        img_cv = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
+
+        # ── Stage 2: Gamma correction ──
+        # Gamma < 1 brightens (pulls up mid-tones).
+        gamma = 0.4 if very_dark else 0.6
+        inv_gamma = 1.0 / gamma
+        lut = np.array(
+            [((i / 255.0) ** inv_gamma) * 255 for i in range(256)]
+        ).astype("uint8")
+        img_cv = cv2.LUT(img_cv, lut)
+
+        # Convert back to PIL
+        enhanced = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
+
+        # ── Stage 3: Auto-contrast to use full dynamic range ──
+        enhanced = ImageOps.autocontrast(enhanced, cutoff=1)
+
+        # ── Stage 4: Slight brightness + contrast boost ──
+        if very_dark:
+            enhanced = ImageEnhance.Brightness(enhanced).enhance(1.3)
+            enhanced = ImageEnhance.Contrast(enhanced).enhance(1.2)
+
         return enhanced

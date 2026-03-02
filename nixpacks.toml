@@ -15,3 +15,6 @@ cmds = [
   "rm -rf /opt/venv/lib/python3.11/site-packages/torch/test",
   "rm -rf /opt/venv/lib/python3.11/site-packages/tensorflow/include"
 ]
+
+[start]
+cmd = "gunicorn app.main:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8080} --timeout 120"
