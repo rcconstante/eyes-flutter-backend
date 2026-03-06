@@ -43,12 +43,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS – allow requests from the mobile app / web test client
+# CORS – allow requests from the mobile app / web test client.
+# NOTE: allow_origins=["*"] is incompatible with allow_credentials=True
+# (browsers reject the wildcard when credentials are present).
+# List every front-end origin explicitly instead.
+_ALLOWED_ORIGINS = [
+    "https://eyes-web.netlify.app",
+    # add additional origins (e.g. custom domain, localhost) as needed:
+    "http://localhost:5173",
+    "http://localhost:4173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=False,          # no cookies / auth headers needed
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
