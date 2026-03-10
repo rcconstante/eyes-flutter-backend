@@ -48,7 +48,7 @@ app = FastAPI(
 # (browsers reject the wildcard when credentials are present).
 # List every front-end origin explicitly instead.
 _ALLOWED_ORIGINS = [
-    "https://eyes-web.netlify.app",
+    "https://eyes-web-app.netlify.app",
     # add additional origins (e.g. custom domain, localhost) as needed:
     "http://localhost:5173",
     "http://localhost:4173",
