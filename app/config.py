@@ -165,8 +165,10 @@ class Settings:
 
     # Currency labels the YOLO model may detect
     CURRENCY_LABELS: set = {
-        "20_peso", "50_peso", "100_peso", "200_peso",
-        "500_peso", "1000_peso", "coin_1", "coin_5", "coin_10",
+        "20_Pesos", "50_Pesos", "100_Pesos", "200_Pesos",
+        "500_Pesos", "1000_Pesos", "Polymer_1000_Pesos",
+        "1_Coin_New", "1_Coin_Old", "5_Coin_New", "5_Coin_Old",
+        "10_Coin_New", "10_Coin_Old", "20_Coin"
     }
 
     PORT: int = int(os.getenv("PORT", "8000"))
