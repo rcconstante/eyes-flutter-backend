@@ -17,12 +17,6 @@ from app.config import settings
 
 # Map YOLO class names → (display name, numeric value)
 _CURRENCY_MAP: dict[str, tuple[str, float]] = {
-    "200_Pesos"
-    "500_Pesos": ("₱500 bill", 500),
-    "1000_Pesos": ("₱1000 bill", 1000),
-    "coin_1": ("₱1 coin", 1),
-    "coin_5": ("₱5 coin", 5),
-    "coin_10": ("₱10 coin", 10),
     "20_Pesos": ("₱20 bill", 20),
     "50_Pesos": ("₱50 bill", 50),
     "100_Pesos": ("₱100 bill", 100),
