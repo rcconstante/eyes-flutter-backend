@@ -37,7 +37,7 @@ _CURRENCY_MAP: dict[str, tuple[str, float]] = {
 @dataclass
 class CurrencyResult:
     """Structured currency detection result."""
-    summary: str          # e.g. "2× ₱100 bill, 1× ₱20 bill – total ₱220"
+    summary: str          # e.g. "Total: P220"
     total_amount: float   # e.g. 220.0
     item_count: int       # total number of bills/coins detected
 
@@ -47,7 +47,7 @@ def detect_currency(detections: list[Detection]) -> CurrencyResult | None:
     Return a structured result summarising detected currency.
 
     Groups duplicate denominations and sums the total.
-    Example summary: "2× ₱100 bill, 1× ₱20 bill – total ₱220"
+    Example summary: "Total: P220"
     Returns None if no currency is detected.
     """
     from collections import Counter
@@ -63,16 +63,10 @@ def detect_currency(detections: list[Detection]) -> CurrencyResult | None:
 
     total = 0.0
     item_count = 0
-    parts: list[str] = []
     for label, count in counts.items():
-        display_name, value = _CURRENCY_MAP[label]
+        _, value = _CURRENCY_MAP[label]
         total += value * count
         item_count += count
-        if count > 1:
-            parts.append(f"{count}× {display_name}")
-        else:
-            parts.append(display_name)
 
-    names = ", ".join(parts)
-    summary = f"{names} – total ₱{total:,.0f}"
+    summary = f"Total: P{total:,.0f}"
     return CurrencyResult(summary=summary, total_amount=total, item_count=item_count)
