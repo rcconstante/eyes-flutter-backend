@@ -22,8 +22,9 @@ _SCENE_RULES: list[tuple[set[str], str]] = [
     ({"laptop", "keyboard", "mouse", "monitor"}, "Office / Desk"),
     ({"car", "truck", "bus", "traffic light", "stop sign"}, "Outdoor / Street"),
     ({"bicycle", "motorcycle"}, "Outdoor / Road"),
-    ({"bench", "potted plant", "bird"}, "Outdoor / Park"),
+    ({"bench", "potted plant", "bird"}, "Outdoor"),
     ({"person"}, "General area"),
+    ({"dog","baseball", "kite", "frisbee", "skateboard"}, "Park"),
 ]
 
 
