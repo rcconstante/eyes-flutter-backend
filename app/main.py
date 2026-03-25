@@ -43,13 +43,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS – allow requests from the mobile app / web test client.
-# NOTE: allow_origins=["*"] is incompatible with allow_credentials=True
-# (browsers reject the wildcard when credentials are present).
-# List every front-end origin explicitly instead.
+# CORS - Cross Origin Resource Sharing
+# List of allowed origins for the API to be accessed from
 _ALLOWED_ORIGINS = [
     "https://eyes-web-app.netlify.app",
-    # add additional origins (e.g. custom domain, localhost) as needed:
     "http://localhost:5173",
     "http://localhost:4173",
 ]
