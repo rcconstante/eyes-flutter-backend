@@ -29,7 +29,7 @@ class Settings:
     CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
     LOW_LIGHT_CONFIDENCE: float = float(os.getenv("LOW_LIGHT_CONFIDENCE", "0.15"))
     LOW_LIGHT_THRESHOLD: float = float(os.getenv("LOW_LIGHT_THRESHOLD", "0.35"))
-    VERY_LOW_LIGHT_THRESHOLD: float = float(os.getenv("VERY_LOW_LIGHT_THRESHOLD", "0.12"))
+    VERY_LOW_LIGHT_THRESHOLD: float = float(os.getenv("VERY_LOW_LIGHT_THRESHOLD", "0.08"))
 
     # Distance calibration (approximate focal-length based)
     # Reference focal length at 640px image height; auto-scaled for other resolutions
@@ -66,50 +66,52 @@ class Settings:
         "bench":            0.5,   # seat height
 
         # ── Animals ──────────────────────────────────────────────────────────
+        "bear":             1.2,   # shoulder height (standing ~2 m; use shoulder)
         "bird":             0.2,   # small-to-medium bird (e.g. pigeon, crow)
         "cat":              0.3,   # shoulder height
+        "cow":              1.4,   # shoulder height
         "dog":              0.5,   # shoulder height (medium breed average)
+        "elephant":         3.0,   # shoulder height
+        "giraffe":          5.0,   # full height
         "horse":            1.6,   # wither height
         "sheep":            0.9,   # shoulder height
-        "cow":              1.4,   # shoulder height
-        "elephant":         3.0,   # shoulder height
-        "bear":             1.2,   # shoulder height (standing ~2 m; use shoulder)
         "zebra":            1.5,   # shoulder height
-        "giraffe":          5.0,   # full height
+        
 
         # ── Accessories & Bags ───────────────────────────────────────────────
         "backpack":         0.45,  # bag height (worn or on ground)
-        "umbrella":         0.9,   # folded/closed length
         "handbag":          0.3,   # bag height
-        "tie":              1.4,   # knot-to-tip length (hanging)
         "suitcase":         0.7,   # upright suitcase height
+        "tie":              1.4,   # knot-to-tip length (hanging)
+        "umbrella":         0.9,   # folded/closed length
+        
 
         # ── Sports Equipment ─────────────────────────────────────────────────
-        "frisbee":          0.27,  # diameter
-        "sports ball":      0.22,  # average (soccer ball ≈ 22 cm diameter)
-        "kite":             0.8,   # approximate visible height when airborne
         "baseball bat":     0.85,  # length
         "baseball glove":   0.25,  # glove height
+        "frisbee":          0.27,  # diameter
+        "kite":             0.8,   # approximate visible height when airborne
+        "sports ball":      0.22,  # average (soccer ball ≈ 22 cm diameter)
         "tennis racket":    0.68,  # racket length
 
         # ── Food & Kitchen (close-range, indoor use) ─────────────────────────
-        "bottle":           0.25,  # typical water/beverage bottle
-        "wine glass":       0.22,  # glass height
-        "cup":              0.15,  # mug/cup height
-        "fork":             0.20,  # fork length
-        "knife":            0.25,  # kitchen knife length
-        "spoon":            0.18,  # spoon length
-        "bowl":             0.10,  # bowl height
-        "banana":           0.18,  # banana length
         "apple":            0.08,  # apple diameter
-        "sandwich":         0.12,  # sandwich height
-        "orange":           0.08,  # orange diameter
+        "banana":           0.18,  # banana length
+        "bottle":           0.25,  # typical water/beverage bottle
+        "bowl":             0.10,  # bowl height
         "broccoli":         0.20,  # head height
-        "carrot":           0.18,  # carrot length
-        "hot dog":          0.15,  # hot dog length
-        "pizza":            0.30,  # pizza diameter (single slice ~0.15 m)
-        "donut":            0.10,  # donut diameter
         "cake":             0.15,  # cake height
+        "carrot":           0.18,  # carrot length
+        "cup":              0.15,  # mug/cup height
+        "donut":            0.10,  # donut diameter
+        "fork":             0.20,  # fork length
+        "hot dog":          0.15,  # hot dog length
+        "knife":            0.25,  # kitchen knife length
+        "orange":           0.08,  # orange diameter
+        "pizza":            0.30,  # pizza diameter (single slice ~0.15 m)
+        "sandwich":         0.12,  # sandwich height
+        "spoon":            0.18,  # spoon length
+        "wine glass":       0.22,  # glass height
 
         # ── Indoor Furniture ─────────────────────────────────────────────────
         "chair":            0.90,  # seat-back height
