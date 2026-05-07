@@ -46,8 +46,6 @@ app = FastAPI(
 # CORS - Cross Origin Resource Sharing
 # List of allowed origins for the API to be accessed from
 _ALLOWED_ORIGINS = [
-    "https://eyes-web.netlify.app",
-    "https://eyes-web-app.netlify.app",
     "http://localhost:5173",
     "http://localhost:4173",
 ]
