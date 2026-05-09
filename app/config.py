@@ -14,6 +14,10 @@ def _resolve_model_path(relative: str) -> str:
     return os.path.join(_BACKEND_DIR, relative)
 
 
+def _csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 class Settings:
     # Model paths (relative to backend/)
     YOLO_MODEL_PATH: str = _resolve_model_path(
@@ -174,6 +178,24 @@ class Settings:
     }
 
     PORT: int = int(os.getenv("PORT", "8000"))
+
+    ALLOWED_ORIGINS: list[str] = _csv(os.getenv(
+        "ALLOWED_ORIGINS",
+        "https://eyes-web.netlify.app,"
+        "https://eyes-web-app.netlify.app,"
+        "http://localhost:5173,"
+        "http://localhost:4173",
+    ))
+    ALLOWED_ORIGIN_REGEX: str | None = os.getenv(
+        "ALLOWED_ORIGIN_REGEX",
+        r"https://.*\.netlify\.app",
+    )
+
+    ELEVENLABS_API_KEY: str | None = os.getenv("ELEVENLABS_API_KEY") or os.getenv("VITE_ELEVENLABS_API_KEY")
+    ELEVENLABS_VOICE_ID: str = os.getenv("ELEVENLABS_VOICE_ID") or os.getenv(
+        "VITE_ELEVENLABS_VOICE_ID",
+        "4RLeKvASM0Zt73Htf5GF",
+    )
 
 
 settings = Settings()

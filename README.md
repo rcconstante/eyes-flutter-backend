@@ -30,7 +30,7 @@ Camera Frame (JPEG)
 │ • Safety alerts              │
 └──────────────┬───────────────┘
                ▼
-         JSON Response
+         Annotated image + JSON response + backend voice alert
 ```
 
 ## Quick Start (Local)
@@ -60,7 +60,7 @@ Health check. Returns `{"status": "ok"}`.
 ### `POST /api/analyze`
 Main analysis endpoint.
 
-**Request:** `multipart/form-data` with field `image` (JPEG file).
+**Request:** `multipart/form-data` with field `image` (JPEG file) and optional `language` (`en` or `fil`).
 
 **Response:**
 ```json
@@ -70,6 +70,10 @@ Main analysis endpoint.
   "currency": null,
   "scene_type": "Outdoor / Street",
   "alerts": ["car nearby – 2.5m"],
+  "voice_alert": "car detected, 2.5 meters ahead. Scene is Outdoor / Street.",
+  "image_data_url": "data:image/jpeg;base64,...",
+  "image_width": 1280,
+  "image_height": 720,
   "detections": [
     {
       "label": "car",
@@ -82,6 +86,13 @@ Main analysis endpoint.
   "processing_time": 0.342
 }
 ```
+
+### `POST /api/tts`
+ElevenLabs proxy endpoint used by the frontend.
+
+**Request:** JSON body with `text` and optional `voiceId`.
+
+**Response:** `audio/mpeg`.
 
 ## Deploy to Railway
 
@@ -114,3 +125,7 @@ Main analysis endpoint.
 | `CONFIDENCE_THRESHOLD` | `0.35` | YOLO confidence threshold |
 | `LOW_LIGHT_THRESHOLD` | `0.35` | Brightness threshold for enhancement |
 | `FOCAL_LENGTH_PX` | `500.0` | Approximate focal length for pinhole distance |
+| `ALLOWED_ORIGINS` | Netlify + localhost defaults | Comma-separated frontend origins allowed by CORS |
+| `ALLOWED_ORIGIN_REGEX` | `https://.*\.netlify\.app` | Optional regex for Netlify preview/custom deploy domains |
+| `ELEVENLABS_API_KEY` | unset | ElevenLabs key used by `/api/tts` |
+| `ELEVENLABS_VOICE_ID` | default app voice | ElevenLabs voice used by `/api/tts` |

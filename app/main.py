@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.models.model_manager import ModelManager
-from app.routers import analyze, health
+from app.routers import analyze, health, tts
 
 logger = logging.getLogger("eyes")
 logging.basicConfig(
@@ -43,18 +43,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS - Cross Origin Resource Sharing
-# List of allowed origins for the API to be accessed from
-_ALLOWED_ORIGINS = [
-    "https://eyes-web-app.netlify.app",
-    "https://eyes-web-application.netlify.app",
-    "http://localhost:5173",
-    "http://localhost:4173",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_ALLOWED_ORIGINS,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origin_regex=settings.ALLOWED_ORIGIN_REGEX,
     allow_credentials=False,          # no cookies / auth headers needed
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
@@ -62,3 +54,4 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(analyze.router, prefix="/api")
+app.include_router(tts.router, prefix="/api")
