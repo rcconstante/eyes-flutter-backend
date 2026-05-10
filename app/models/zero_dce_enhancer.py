@@ -10,21 +10,24 @@ Architecture (matches the training notebook):
 Inference strategy (preserves quality for YOLO):
   - DCE-Net predicts curve *parameters*, not pixels. We predict on a
     fast 256×256 input but apply the curve at the *original* image
-    resolution, so no detail is lost. A prior version resized pixels
-    back up, which blurred the output and hurt detections.
+    resolution, so no detail is lost.
 
 Aggressiveness:
   - Normal low-light: 8 curve iterations (the paper's 7-32-8 setting).
-  - Very dark frames: 16 iterations (the paper's 7-32-16 setting) by
-    cycling through the 8 learned curves twice. This is the strongest
-    non-retrained variant reported in the paper.
+  - Very dark: 16 iterations (7-32-16) by cycling through the 8
+    learned curves twice. This is the strongest non-retrained variant
+    reported in the paper.
 
-Safety guarantees (important – we cannot return a darker image):
-  - Every stage is monitored. If the candidate output is darker than
-    the stage input, we discard it.
-  - A final classical boost (CLAHE + correct gamma) is stacked on top
-    if brightness is still below the detection-friendly target so
-    YOLO always receives a usable frame.
+Colour safety (why this file exists in its current shape):
+  - All tone operations happen on the L channel in LAB colour space.
+    Operating in RGB per-channel — as a previous version did — causes
+    each channel to saturate at a different rate, producing the
+    characteristic purple/magenta fringing on blown-out highlights
+    seen in the cake-lights test image.
+  - A shadow-lift curve targets only dark pixels. Highlights are
+    preserved, so the small bright regions stop blooming.
+  - No per-channel linear rescale. That step was the main cause of
+    over-exposure artefacts.
 """
 
 import logging
@@ -32,7 +35,7 @@ import os
 
 import cv2
 import numpy as np
-from PIL import Image, ImageOps, ImageEnhance
+from PIL import Image
 
 logger = logging.getLogger("eyes.zero_dce")
 
@@ -70,11 +73,53 @@ def _build_dce_net(image_size=256):
     return keras.Model(inputs=input_image, outputs=x_r)
 
 
+def _lift_shadows_lab(image: Image.Image, strength: float) -> Image.Image:
+    """Lift dark regions by boosting the L channel in LAB space.
+
+    The curve:  L' = L + strength · (1 − L)² · L^0.25
+
+    Properties:
+      - When L ≈ 0 (deep shadow): L' ≈ strength · L^0.25, so we pull
+        very dark pixels up towards the mid-tones without touching
+        anything that's already well-lit.
+      - When L ≈ 1 (highlight): (1 − L)² ≈ 0, so L' ≈ L. Bright spots
+        like light sources are not blown out.
+      - Chrominance (a, b) is left untouched, so colours don't shift
+        and no purple/magenta fringing is introduced.
+    """
+    if strength <= 0:
+        return image
+
+    img_cv = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2LAB)
+    l, a, b = cv2.split(img_cv)
+
+    l_f = l.astype(np.float32) / 255.0
+    lifted = l_f + strength * ((1.0 - l_f) ** 2) * np.power(np.clip(l_f, 1e-3, 1.0), 0.25)
+    lifted = np.clip(lifted, 0.0, 1.0)
+
+    # Apply a gentle CLAHE to the lifted L channel so local contrast
+    # comes back without amplifying chroma noise.
+    l_out = (lifted * 255.0).astype(np.uint8)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l_out = clahe.apply(l_out)
+
+    merged = cv2.merge([l_out, a, b])
+    rgb = cv2.cvtColor(merged, cv2.COLOR_LAB2RGB)
+    return Image.fromarray(rgb)
+
+
+def _denoise(image: Image.Image) -> Image.Image:
+    """Mild bilateral filter to suppress chroma noise after enhancement."""
+    arr = np.array(image.convert("RGB"))
+    arr = cv2.bilateralFilter(arr, d=5, sigmaColor=35, sigmaSpace=35)
+    return Image.fromarray(arr)
+
+
 class ZeroDCEEnhancer:
-    """Enhance low-light images using Zero-DCE (with classical safety net)."""
+    """Enhance low-light images using Zero-DCE + LAB shadow lift."""
 
     # Target brightness YOLO expects. Anything below this after the model
-    # pass gets the classical boost stacked on top.
+    # pass gets the shadow-lift stage layered on top.
     _TARGET_BRIGHTNESS = 0.40
 
     def __init__(self):
@@ -98,7 +143,7 @@ class ZeroDCEEnhancer:
         else:
             logger.warning(
                 f"Zero-DCE model not found at {model_path}. "
-                "Using CLAHE + gamma fallback."
+                "Using LAB shadow-lift fallback."
             )
 
     @property
@@ -108,7 +153,7 @@ class ZeroDCEEnhancer:
     # ── public API ────────────────────────────────────────────
 
     def enhance(self, image: Image.Image, very_dark: bool = False) -> Image.Image:
-        """Return an enhanced PIL Image, guaranteed ≥ as bright as the input."""
+        """Return an enhanced PIL Image without blowing out highlights."""
         input_brightness = self.get_brightness(image)
 
         # Step 1 – Zero-DCE model pass (16 iterations for very dark, 8 otherwise)
@@ -119,7 +164,7 @@ class ZeroDCEEnhancer:
             logger.info(
                 f"Zero-DCE ({iterations} iter): {input_brightness:.3f} → {out_brightness:.3f}"
             )
-            # Never let the model pass make the image darker.
+            # Never return something darker than we got.
             if out_brightness < input_brightness:
                 logger.info("Zero-DCE pass darkened image → keeping original")
                 result = image
@@ -128,28 +173,26 @@ class ZeroDCEEnhancer:
             result = image
             out_brightness = input_brightness
 
-        # Step 2 – Classical boost stacked on top if still too dim for detection.
+        # Step 2 – LAB shadow lift. This is colour-safe (a,b untouched)
+        # and highlight-preserving (curve is ~0 near L=1). We only lift
+        # if YOLO would struggle with the current brightness.
         if out_brightness < self._TARGET_BRIGHTNESS:
-            boosted = self._fallback_enhance(result, very_dark=very_dark)
-            boosted_brightness = self.get_brightness(boosted)
+            strength = 1.4 if very_dark else 0.9
+            lifted = _lift_shadows_lab(result, strength=strength)
+            lifted_brightness = self.get_brightness(lifted)
             logger.info(
-                f"Classical boost: {out_brightness:.3f} → {boosted_brightness:.3f}"
+                f"LAB shadow lift (s={strength:.1f}): "
+                f"{out_brightness:.3f} → {lifted_brightness:.3f}"
             )
-            if boosted_brightness > out_brightness:
-                result = boosted
-                out_brightness = boosted_brightness
+            if lifted_brightness > out_brightness:
+                result = lifted
+                out_brightness = lifted_brightness
 
-        # Step 3 – Last-resort linear brightness scale. Guarantees the caller
-        # sees *something* brighter than the input for truly under-exposed
-        # frames. This only kicks in if every preceding stage left us dim.
-        if out_brightness < self._TARGET_BRIGHTNESS and out_brightness > 0:
-            scale = min(self._TARGET_BRIGHTNESS / out_brightness, 4.0)
-            arr = np.asarray(result.convert("RGB"), dtype=np.float32) * scale
-            arr = np.clip(arr, 0, 255).astype(np.uint8)
-            result = Image.fromarray(arr)
-            logger.info(
-                f"Linear rescale ×{scale:.2f} → {self.get_brightness(result):.3f}"
-            )
+        # Step 3 – Mild denoise only if we had to boost a lot. Bilateral
+        # preserves edges (important for YOLO) while killing the colour
+        # speckle that naturally appears in lifted shadows.
+        if very_dark and out_brightness > input_brightness + 0.10:
+            result = _denoise(result)
 
         return result
 
@@ -208,42 +251,3 @@ class ZeroDCEEnhancer:
 
         x = np.clip(x * 255.0, 0, 255).astype(np.uint8)
         return Image.fromarray(x)
-
-    @staticmethod
-    def _fallback_enhance(image: Image.Image, very_dark: bool = False) -> Image.Image:
-        """CLAHE → gamma (correct direction) → auto-contrast → brightness/contrast."""
-        img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-
-        # ── Stage 1: CLAHE on L channel (LAB) for adaptive local contrast. ──
-        lab = cv2.cvtColor(img_cv, cv2.COLOR_BGR2LAB)
-        l_channel, a_channel, b_channel = cv2.split(lab)
-
-        clip_limit = 6.0 if very_dark else 3.5
-        clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
-        l_enhanced = clahe.apply(l_channel)
-
-        lab_enhanced = cv2.merge([l_enhanced, a_channel, b_channel])
-        img_cv = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
-
-        # ── Stage 2: Gamma correction. out = in**(1/gamma). ─────────────────
-        # IMPORTANT: gamma > 1 brightens (pulls midtones up); gamma < 1 darkens.
-        # A prior version used gamma < 1 here, which silently *darkened* the
-        # image and defeated the entire enhancer.
-        gamma = 2.8 if very_dark else 1.8
-        inv_gamma = 1.0 / gamma
-        lut = np.array(
-            [((i / 255.0) ** inv_gamma) * 255 for i in range(256)]
-        ).astype("uint8")
-        img_cv = cv2.LUT(img_cv, lut)
-
-        enhanced = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
-
-        # ── Stage 3: Auto-contrast so we use the full tonal range. ──────────
-        enhanced = ImageOps.autocontrast(enhanced, cutoff=1)
-
-        # ── Stage 4: Small brightness + contrast polish for very dark input. ─
-        if very_dark:
-            enhanced = ImageEnhance.Brightness(enhanced).enhance(1.4)
-            enhanced = ImageEnhance.Contrast(enhanced).enhance(1.25)
-
-        return enhanced
