@@ -183,11 +183,12 @@ async def analyze_image(
     enhanced = False
     very_dark = False
     zero_dce = manager.get_zero_dce()
-    mean_brightness = zero_dce.get_brightness(pil_image)
+    stats = zero_dce.get_image_stats(pil_image)
+    mean_brightness = stats["mean"]
     logger.info(
-        f"Image brightness: {mean_brightness:.3f} "
-        f"(low-light threshold: {settings.LOW_LIGHT_THRESHOLD}, "
-        f"very-low: {settings.VERY_LOW_LIGHT_THRESHOLD})"
+        f"Image stats: mean={stats['mean']:.3f} max={stats['max']:.3f} "
+        f"std={stats['std']:.3f} (low-light<{settings.LOW_LIGHT_THRESHOLD}, "
+        f"very-low<{settings.VERY_LOW_LIGHT_THRESHOLD})"
     )
     if mean_brightness < settings.VERY_LOW_LIGHT_THRESHOLD:
         very_dark = True
@@ -204,21 +205,14 @@ async def analyze_image(
 
     # ── 3. Object detection ────────────────────────────────────
     # Use a lower confidence threshold for dark images so faint
-    # detections are not discarded prematurely.
+    # detections are not discarded prematurely. The enhanced image is
+    # *always* what we run YOLO on — falling back to the original dark
+    # frame here would just guarantee zero detections, which defeats
+    # the whole point of enhancement.
     yolo = manager.get_yolo()
     det_conf = settings.LOW_LIGHT_CONFIDENCE if enhanced else None
     detections = yolo.detect(pil_image, conf=det_conf)
     logger.info(f"Detected {len(detections)} objects (conf={det_conf or settings.CONFIDENCE_THRESHOLD})")
-
-    # If enhanced image yielded no results, retry with original
-    if enhanced and len(detections) == 0:
-        logger.info("Enhancement may have degraded image → retrying with original")
-        original_image = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
-        detections = yolo.detect(original_image, conf=settings.LOW_LIGHT_CONFIDENCE)
-        if detections:
-            logger.info(f"Original image detected {len(detections)} objects")
-            pil_image = original_image
-            enhanced = False
 
     # ── 4. Depth estimation ────────────────────────────────────
     depth_map = None

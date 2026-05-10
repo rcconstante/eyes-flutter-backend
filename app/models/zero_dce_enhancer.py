@@ -9,8 +9,8 @@ Mirrors the architecture from the training notebook:
 
 On startup the model attempts to load a Keras H5 model from
 `models/zero_dce_model.h5`. If not found, it falls back to a
-multi-stage enhancement pipeline (CLAHE + gamma correction +
-auto-contrast) that is much more effective on very dark images.
+CLAHE + gamma + auto-contrast pipeline so the endpoint still
+works when the weights aren't deployed.
 """
 
 import logging
@@ -108,12 +108,11 @@ class ZeroDCEEnhancer:
 
         Args:
             image: Input PIL image.
-            very_dark: If True, apply more aggressive enhancement
-                       (multi-pass model or stronger gamma).
+            very_dark: If True, run the Zero-DCE model a second time when
+                       the first pass leaves the frame dim.
         """
         if self.dce_model is not None:
             result = self._enhance_with_model(image)
-            # For very dark images, run a second pass through the model
             if very_dark:
                 brightness_after = self.get_brightness(result)
                 logger.info(f"Brightness after 1st Zero-DCE pass: {brightness_after:.3f}")
@@ -138,6 +137,17 @@ class ZeroDCEEnhancer:
         """Return average brightness of the image as 0.0–1.0."""
         gray = image.convert("L")
         return float(np.array(gray).mean() / 255.0)
+
+    @staticmethod
+    def get_image_stats(image: Image.Image) -> dict:
+        """Return diagnostic stats so we can tell signal from pure noise."""
+        arr = np.array(image.convert("L"))
+        return {
+            "mean": float(arr.mean()) / 255.0,
+            "max": float(arr.max()) / 255.0,
+            "min": float(arr.min()) / 255.0,
+            "std": float(arr.std()) / 255.0,
+        }
 
     # ── internals ─────────────────────────────────────────────
 
@@ -165,12 +175,8 @@ class ZeroDCEEnhancer:
 
     @staticmethod
     def _fallback_enhance(image: Image.Image, very_dark: bool = False) -> Image.Image:
-        """Multi-stage fallback: CLAHE → gamma correction → auto-contrast.
-
-        Much more effective than plain autocontrast for truly dark images.
-        """
+        """Multi-stage fallback: CLAHE → gamma correction → auto-contrast."""
         # ── Stage 1: CLAHE (Contrast Limited Adaptive Histogram Equalization) ──
-        # Works per-tile so it recovers local contrast even in very dark images.
         img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
         # Convert to LAB colour space so we only enhance lightness
@@ -185,7 +191,6 @@ class ZeroDCEEnhancer:
         img_cv = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
 
         # ── Stage 2: Gamma correction ──
-        # Gamma < 1 brightens (pulls up mid-tones).
         gamma = 0.4 if very_dark else 0.6
         inv_gamma = 1.0 / gamma
         lut = np.array(
@@ -193,7 +198,6 @@ class ZeroDCEEnhancer:
         ).astype("uint8")
         img_cv = cv2.LUT(img_cv, lut)
 
-        # Convert back to PIL
         enhanced = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
 
         # ── Stage 3: Auto-contrast to use full dynamic range ──
