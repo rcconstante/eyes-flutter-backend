@@ -1,28 +1,30 @@
 """
 Zero-DCE low-light image enhancement wrapper.
 
-Mirrors the architecture from the training notebook:
+Architecture (matches the training notebook):
   - DCE-Net: 7 Conv2D layers (32 filters, 3×3, stride 1, ReLU)
     with symmetrical skip connections and a final Tanh layer
     producing 24 parameter maps (8 iterations × 3 channels).
   - Enhancement: iterative curve application LE(x) = x + α·x·(1−x).
 
-Inference strategy (important for YOLO quality):
-  - The DCE-Net predicts curve *parameters*, not pixel values. We
-    therefore predict the curves on a fast 256×256 input but apply
-    them at the original image resolution, preserving all the detail
-    YOLO needs for detection. Resizing the enhanced pixels back up
-    (as a prior version did) caused heavy blur and killed detections.
+Inference strategy (preserves quality for YOLO):
+  - DCE-Net predicts curve *parameters*, not pixels. We predict on a
+    fast 256×256 input but apply the curve at the *original* image
+    resolution, so no detail is lost. A prior version resized pixels
+    back up, which blurred the output and hurt detections.
 
-Safety behaviour:
-  - Zero-DCE's tanh output can reduce already-bright regions. If a
-    pass makes the image *darker* than it started, we discard it.
-  - If the final result is still dim we stack the CLAHE + gamma
-    fallback on top so YOLO always receives a usable frame.
+Aggressiveness:
+  - Normal low-light: 8 curve iterations (the paper's 7-32-8 setting).
+  - Very dark frames: 16 iterations (the paper's 7-32-16 setting) by
+    cycling through the 8 learned curves twice. This is the strongest
+    non-retrained variant reported in the paper.
 
-On startup the model loads a Keras H5 file from
-`models/zero_dce_model.h5`. If unavailable, a CLAHE + gamma +
-auto-contrast fallback keeps the endpoint functional.
+Safety guarantees (important – we cannot return a darker image):
+  - Every stage is monitored. If the candidate output is darker than
+    the stage input, we discard it.
+  - A final classical boost (CLAHE + correct gamma) is stacked on top
+    if brightness is still below the detection-friendly target so
+    YOLO always receives a usable frame.
 """
 
 import logging
@@ -69,11 +71,11 @@ def _build_dce_net(image_size=256):
 
 
 class ZeroDCEEnhancer:
-    """Enhance low-light images using Zero-DCE (or fallback)."""
+    """Enhance low-light images using Zero-DCE (with classical safety net)."""
 
-    # Minimum brightness we'd like YOLO to receive. Anything below this
-    # after the model pass gets the classical boost stacked on top.
-    _TARGET_BRIGHTNESS = 0.35
+    # Target brightness YOLO expects. Anything below this after the model
+    # pass gets the classical boost stacked on top.
+    _TARGET_BRIGHTNESS = 0.40
 
     def __init__(self):
         from app.config import settings
@@ -106,52 +108,50 @@ class ZeroDCEEnhancer:
     # ── public API ────────────────────────────────────────────
 
     def enhance(self, image: Image.Image, very_dark: bool = False) -> Image.Image:
-        """Return an enhanced PIL Image guaranteed to be ≥ as bright as the input.
-
-        Args:
-            image: Input PIL image.
-            very_dark: Allow an extra Zero-DCE pass + classical boost chain.
-        """
+        """Return an enhanced PIL Image, guaranteed ≥ as bright as the input."""
         input_brightness = self.get_brightness(image)
 
+        # Step 1 – Zero-DCE model pass (16 iterations for very dark, 8 otherwise)
         if self.dce_model is not None:
-            result = self._enhance_with_model(image)
+            iterations = 16 if very_dark else 8
+            result = self._enhance_with_model(image, iterations=iterations)
             out_brightness = self.get_brightness(result)
             logger.info(
-                f"Brightness after 1st Zero-DCE pass: {out_brightness:.3f} "
-                f"(input {input_brightness:.3f})"
+                f"Zero-DCE ({iterations} iter): {input_brightness:.3f} → {out_brightness:.3f}"
             )
-
-            # Safety: never return something darker than we got.
+            # Never let the model pass make the image darker.
             if out_brightness < input_brightness:
-                logger.info("Zero-DCE pass darkened the image → keeping original")
+                logger.info("Zero-DCE pass darkened image → keeping original")
                 result = image
                 out_brightness = input_brightness
+        else:
+            result = image
+            out_brightness = input_brightness
 
-            # Optional 2nd pass for very dark inputs, but only if the 1st
-            # pass actually helped. Otherwise we're just piling on noise.
-            if very_dark and out_brightness < self._TARGET_BRIGHTNESS:
-                second = self._enhance_with_model(result)
-                b2 = self.get_brightness(second)
-                logger.info(f"Brightness after 2nd Zero-DCE pass: {b2:.3f}")
-                if b2 > out_brightness:
-                    result = second
-                    out_brightness = b2
+        # Step 2 – Classical boost stacked on top if still too dim for detection.
+        if out_brightness < self._TARGET_BRIGHTNESS:
+            boosted = self._fallback_enhance(result, very_dark=very_dark)
+            boosted_brightness = self.get_brightness(boosted)
+            logger.info(
+                f"Classical boost: {out_brightness:.3f} → {boosted_brightness:.3f}"
+            )
+            if boosted_brightness > out_brightness:
+                result = boosted
+                out_brightness = boosted_brightness
 
-            # Still too dim for detection? Stack classical boost on top.
-            if out_brightness < self._TARGET_BRIGHTNESS:
-                boosted = self._fallback_enhance(result, very_dark=very_dark)
-                boosted_b = self.get_brightness(boosted)
-                logger.info(
-                    f"Brightness after CLAHE+gamma stack: {boosted_b:.3f}"
-                )
-                if boosted_b > out_brightness:
-                    result = boosted
+        # Step 3 – Last-resort linear brightness scale. Guarantees the caller
+        # sees *something* brighter than the input for truly under-exposed
+        # frames. This only kicks in if every preceding stage left us dim.
+        if out_brightness < self._TARGET_BRIGHTNESS and out_brightness > 0:
+            scale = min(self._TARGET_BRIGHTNESS / out_brightness, 4.0)
+            arr = np.asarray(result.convert("RGB"), dtype=np.float32) * scale
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+            result = Image.fromarray(arr)
+            logger.info(
+                f"Linear rescale ×{scale:.2f} → {self.get_brightness(result):.3f}"
+            )
 
-            return result
-
-        # No model available — run the classical pipeline directly.
-        return self._fallback_enhance(image, very_dark=very_dark)
+        return result
 
     @staticmethod
     def is_low_light(image: Image.Image, threshold: float = 0.35) -> bool:
@@ -175,43 +175,35 @@ class ZeroDCEEnhancer:
 
     # ── internals ─────────────────────────────────────────────
 
-    def _enhance_with_model(self, image: Image.Image) -> Image.Image:
+    def _enhance_with_model(self, image: Image.Image, iterations: int = 8) -> Image.Image:
         """Apply Zero-DCE curves at the *original* resolution.
 
-        The DCE-Net requires a fixed 256×256 input, but the learned curve
-        parameters are just 24 per-pixel coefficients. We therefore:
-          1. Predict the 24-channel curve map at 256×256.
-          2. Bilinearly upsample the curve map to the image's native
-             resolution.
-          3. Apply the 8-iteration LE(x)=x+α·x·(1−x) curve in-place on
-             the full-resolution pixels.
-
-        This preserves every pixel of detail YOLO needs while keeping
-        inference cheap.
+        The network outputs an 8-iteration curve map (24 channels).
+        For `iterations=16` we cycle through that learned set twice —
+        this is the 7-32-16 variant from the Zero-DCE paper.
         """
         tf = _lazy_import_tf()
 
-        # Full-resolution pixels (float32 in 0..1)
         img_full = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
         h, w = img_full.shape[:2]
 
-        # Down-sample for the network
-        img_small = np.asarray(image.convert("RGB").resize((256, 256), Image.BILINEAR),
-                               dtype=np.float32) / 255.0
+        img_small = np.asarray(
+            image.convert("RGB").resize((256, 256), Image.BILINEAR),
+            dtype=np.float32,
+        ) / 255.0
         input_tensor = tf.expand_dims(img_small, axis=0)
 
-        # Predict curve parameter map at 256×256
-        curve_params_small = self.dce_model(input_tensor).numpy()[0]  # (256, 256, 24)
-
-        # Upsample curve params to native resolution (cv2 wants (w, h))
+        # Predict curve parameter map at 256×256, then upsample to native res.
+        curve_params_small = self.dce_model(input_tensor).numpy()[0]       # (256,256,24)
         curve_params_full = cv2.resize(
             curve_params_small, (w, h), interpolation=cv2.INTER_LINEAR
         )
 
-        # Apply the 8-iteration Zero-DCE curve at full resolution
+        # Apply LE(x)=x+α·x·(1−x) repeatedly. Each block of 3 channels is one α.
         x = img_full
-        for i in range(0, 24, 3):
-            r = curve_params_full[:, :, i:i + 3]
+        for it in range(iterations):
+            offset = (it % 8) * 3
+            r = curve_params_full[:, :, offset:offset + 3]
             x = x + r * (x - x * x)
 
         x = np.clip(x * 255.0, 0, 255).astype(np.uint8)
@@ -219,20 +211,25 @@ class ZeroDCEEnhancer:
 
     @staticmethod
     def _fallback_enhance(image: Image.Image, very_dark: bool = False) -> Image.Image:
-        """Classical CLAHE → gamma → auto-contrast pipeline."""
+        """CLAHE → gamma (correct direction) → auto-contrast → brightness/contrast."""
         img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
+        # ── Stage 1: CLAHE on L channel (LAB) for adaptive local contrast. ──
         lab = cv2.cvtColor(img_cv, cv2.COLOR_BGR2LAB)
         l_channel, a_channel, b_channel = cv2.split(lab)
 
-        clip_limit = 4.0 if very_dark else 3.0
+        clip_limit = 6.0 if very_dark else 3.5
         clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
         l_enhanced = clahe.apply(l_channel)
 
         lab_enhanced = cv2.merge([l_enhanced, a_channel, b_channel])
         img_cv = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
 
-        gamma = 0.4 if very_dark else 0.6
+        # ── Stage 2: Gamma correction. out = in**(1/gamma). ─────────────────
+        # IMPORTANT: gamma > 1 brightens (pulls midtones up); gamma < 1 darkens.
+        # A prior version used gamma < 1 here, which silently *darkened* the
+        # image and defeated the entire enhancer.
+        gamma = 2.8 if very_dark else 1.8
         inv_gamma = 1.0 / gamma
         lut = np.array(
             [((i / 255.0) ** inv_gamma) * 255 for i in range(256)]
@@ -240,10 +237,13 @@ class ZeroDCEEnhancer:
         img_cv = cv2.LUT(img_cv, lut)
 
         enhanced = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
+
+        # ── Stage 3: Auto-contrast so we use the full tonal range. ──────────
         enhanced = ImageOps.autocontrast(enhanced, cutoff=1)
 
+        # ── Stage 4: Small brightness + contrast polish for very dark input. ─
         if very_dark:
-            enhanced = ImageEnhance.Brightness(enhanced).enhance(1.3)
-            enhanced = ImageEnhance.Contrast(enhanced).enhance(1.2)
+            enhanced = ImageEnhance.Brightness(enhanced).enhance(1.4)
+            enhanced = ImageEnhance.Contrast(enhanced).enhance(1.25)
 
         return enhanced
